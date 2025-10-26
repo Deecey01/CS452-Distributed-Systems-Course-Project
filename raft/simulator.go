@@ -68,8 +68,13 @@ type RemoveServers struct {
 	ServerIds []int
 }
 
-// Create a new ClusterSimulator
+// Create a new ClusterSimulator with default batching configuration
 func CreateNewCluster(t *testing.T, n uint64) *ClusterSimulator {
+	return CreateNewClusterWithBatchConfig(t, n, 10, 50*time.Millisecond)
+}
+
+// CreateNewClusterWithBatchConfig creates a new ClusterSimulator with custom batching configuration
+func CreateNewClusterWithBatchConfig(t *testing.T, n uint64, batchSize int, batchWait time.Duration) *ClusterSimulator {
 	// initialising required fields of ClusterSimulator
 
 	serverList := make(map[uint64]*Server)
@@ -96,7 +101,8 @@ func CreateNewCluster(t *testing.T, n uint64) *ClusterSimulator {
 
 		storage[i] = NewDatabase()
 		commitChans[i] = make(chan CommitEntry)
-		serverList[i] = CreateServer(i, peerList, storage[i], ready, commitChans[i])
+		// Create server with custom batch config
+		serverList[i] = CreateServerWithBatchConfig(i, peerList, storage[i], ready, commitChans[i], batchSize, batchWait)
 
 		serverList[i].Serve()
 		isAlive[i] = true
@@ -164,50 +170,6 @@ func (nc *ClusterSimulator) collectCommits(i uint64) error {
 		nc.mu.Lock()
 		logtest(i, "collectCommits (%d) got %+v", i, commit)
 		switch v := commit.Command.(type) {
-		case Batch:
-			logtest(i, "Processing BATCH with %d commands", len(v.Commands))
-			// Unpack batch and apply each command individually
-			for idx, cmd := range v.Commands {
-				logtest(i, "Applying batched command [%d/%d]: %+v", idx+1, len(v.Commands), cmd)
-				switch batchedCmd := cmd.(type) {
-				case Write:
-					var buf bytes.Buffer        // Buffer to hold the data
-					enc := gob.NewEncoder(&buf) // Create a new encoder
-
-					if err := enc.Encode(batchedCmd.Val); err != nil { // Encode the data
-						nc.mu.Unlock()
-						return err
-					}
-					nc.dbCluster[i].Set(batchedCmd.Key, buf.Bytes()) // Save the data to the database
-				case Read:
-					// Reads in batch are no-op for state machine
-					break
-				case RemoveServers:
-					// Handle RemoveServers inside batch
-					serverIds := batchedCmd.ServerIds
-					for j := uint64(0); j < uint64(len(serverIds)); j++ {
-						if nc.activeServers.Exists(uint64(serverIds[j])) {
-							nc.DisconnectPeer(uint64(serverIds[j]))
-							nc.isAlive[uint64(serverIds[j])] = false
-							nc.raftCluster[uint64(serverIds[j])].Stop()
-							nc.commits[uint64(serverIds[j])] = nc.commits[uint64(serverIds[j])][:0]
-							close(nc.commitChans[uint64(serverIds[j])])
-
-							delete(nc.raftCluster, uint64(serverIds[j]))
-							delete(nc.dbCluster, uint64(serverIds[j]))
-							delete(nc.commitChans, uint64(serverIds[j]))
-							delete(nc.commits, uint64(serverIds[j]))
-							delete(nc.isAlive, uint64(serverIds[j]))
-							delete(nc.isConnected, uint64(serverIds[j]))
-
-							nc.activeServers.Remove(uint64(serverIds[j]))
-						}
-					}
-				default:
-					// Unknown command type in batch, ignore
-					break
-				}
-			}
 		case Read:
 			break
 		case Write:

@@ -30,6 +30,9 @@ type Server struct {
 	commitChan chan CommitEntry   // channel to receive commit entries from raftnode
 	ready      <-chan interface{} // channel to indicate raftnode that this server is connected to its peers
 
+	batchSize int           // batch size configuration for RaftNode
+	batchWait time.Duration // batch wait configuration for RaftNode
+
 	service *ServiceType // DUMMY SERVICE FOR TESTING PURPOSES
 }
 
@@ -39,7 +42,13 @@ type RPCProxy struct {
 }
 
 //create a Server Instance with serverId and list of peerIds
+// CreateServer creates a new server with default batching configuration
 func CreateServer(serverId uint64, peerList Set, db *Database, ready <-chan interface{}, commitChan chan CommitEntry) *Server {
+	return CreateServerWithBatchConfig(serverId, peerList, db, ready, commitChan, 10, 50*time.Millisecond)
+}
+
+// CreateServerWithBatchConfig creates a new server with custom batching configuration
+func CreateServerWithBatchConfig(serverId uint64, peerList Set, db *Database, ready <-chan interface{}, commitChan chan CommitEntry, batchSize int, batchWait time.Duration) *Server {
 	s := new(Server)
 	s.serverId = serverId
 	s.peerList = peerList
@@ -48,6 +57,8 @@ func CreateServer(serverId uint64, peerList Set, db *Database, ready <-chan inte
 	s.ready = ready
 	s.commitChan = commitChan
 	s.quit = make(chan interface{})
+	s.batchSize = batchSize
+	s.batchWait = batchWait
 	return s
 }
 
@@ -83,7 +94,7 @@ func (s *Server) ConnectionAccept() {
 //4. start listening for incoming connections
 func (s *Server) Serve(port ...string) {
 	s.mu.Lock()
-	s.rn = NewRaftNode(s.serverId, s.peerList, s, s.db, s.ready, s.commitChan)
+	s.rn = NewRaftNodeWithBatchConfig(s.serverId, s.peerList, s, s.db, s.ready, s.commitChan, s.batchSize, s.batchWait)
 
 	s.rpcServer = rpc.NewServer() //create a new RPC Server for the new service
 	s.rpcProxy = &RPCProxy{rn: s.rn}

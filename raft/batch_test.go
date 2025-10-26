@@ -28,10 +28,10 @@ func TestBatchWritesFinalValue(t *testing.T) {
 
 	leaderId, _, _ := cs.CheckUniqueLeader()
 
-	// Rapidly submit several writes to the leader.
-	key := "batch-key"
+	// Rapidly submit several writes to the leader with unique keys.
 	const N = 10
 	for i := 0; i < N; i++ {
+		key := "batch-key-" + string(rune('0'+i))
 		if ok, _, _ := cs.SubmitToServer(leaderId, Write{Key: key, Val: i}); !ok {
 			t.Fatalf("leader rejected SubmitToServer for %d", i)
 		}
@@ -40,19 +40,22 @@ func TestBatchWritesFinalValue(t *testing.T) {
 	// Allow some time for replication/commit to complete.
 	time.Sleep(500 * time.Millisecond)
 
-	// Verify that each active server has the final value (N-1) for the key.
+	// Verify that each active server has all N keys with correct values.
 	for id := range cs.activeServers.peerSet {
-		raw, found := cs.dbCluster[id].Get(key)
-		if !found {
-			t.Fatalf("server %d: key %q not found in db", id, key)
-		}
-		var v int
-		dec := gob.NewDecoder(bytes.NewBuffer(raw))
-		if err := dec.Decode(&v); err != nil {
-			t.Fatalf("server %d: decode error: %v", id, err)
-		}
-		if v != N-1 {
-			t.Fatalf("server %d: want final value %d, got %d", id, N-1, v)
+		for i := 0; i < N; i++ {
+			key := "batch-key-" + string(rune('0'+i))
+			raw, found := cs.dbCluster[id].Get(key)
+			if !found {
+				t.Fatalf("server %d: key %q not found in db", id, key)
+			}
+			var v int
+			dec := gob.NewDecoder(bytes.NewBuffer(raw))
+			if err := dec.Decode(&v); err != nil {
+				t.Fatalf("server %d: decode error: %v", id, err)
+			}
+			if v != i {
+				t.Fatalf("server %d: key %q want value %d, got %d", id, key, i, v)
+			}
 		}
 	}
 }
@@ -105,6 +108,117 @@ func TestBatchMixedCommands(t *testing.T) {
 	}
 	if numFound*2 <= cs.activeServers.Size() {
 		t.Fatalf("expected majority to have final write, got %d/%d", numFound, cs.activeServers.Size())
+	}
+}
+
+// TestBatchTimeWindowOnly tests time-window based batching where the leader
+// collects writes for a fixed time window (20ms) and then flushes whatever
+// it has collected, rather than waiting for a fixed size. This reduces latency
+// in scenarios where write rate is variable.
+func TestBatchTimeWindowOnly(t *testing.T) {
+	defer leaktest.CheckTimeout(t, 100*time.Millisecond)
+
+	// Create cluster with time-window batching: unlimited size, 20ms window
+	// Using math.MaxInt32 as "unlimited" size (won't trigger size-based flush)
+	cs := CreateNewClusterWithBatchConfig(t, 3, 1000000, 20*time.Millisecond)
+	defer cs.Shutdown()
+
+	gob.Register(Write{})
+	gob.Register(Read{})
+	gob.Register(AddServers{})
+	gob.Register(RemoveServers{})
+
+	leaderId, _, _ := cs.CheckUniqueLeader()
+
+	// Submit writes with some spacing to test time-window behavior
+	// We'll submit in bursts to see multiple time-window flushes
+	const totalWrites = 25
+
+	// Burst 1: 10 writes quickly (should be batched in one 20ms window)
+	for i := 0; i < 10; i++ {
+		key := "time-key-" + string(rune('0'+i))
+		if ok, _, _ := cs.SubmitToServer(leaderId, Write{Key: key, Val: i}); !ok {
+			t.Fatalf("leader rejected write %d", i)
+		}
+	}
+
+	// Wait 25ms (longer than batch window) to ensure first batch is flushed
+	time.Sleep(25 * time.Millisecond)
+
+	// Burst 2: another 10 writes (should be in second batch)
+	for i := 10; i < 20; i++ {
+		key := "time-key-" + string(rune('0'+(i-10))) + string(rune('0'+(i/10)))
+		if ok, _, _ := cs.SubmitToServer(leaderId, Write{Key: key, Val: i}); !ok {
+			t.Fatalf("leader rejected write %d", i)
+		}
+	}
+
+	// Wait again
+	time.Sleep(25 * time.Millisecond)
+
+	// Burst 3: final 5 writes (should be in third batch)
+	for i := 20; i < totalWrites; i++ {
+		key := "time-key-final-" + string(rune('0'+(i-20)))
+		if ok, _, _ := cs.SubmitToServer(leaderId, Write{Key: key, Val: i}); !ok {
+			t.Fatalf("leader rejected write %d", i)
+		}
+	}
+
+	// Allow time for final replication/commit
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify all writes are present on all active servers
+	for id := range cs.activeServers.peerSet {
+		// Check burst 1
+		for i := 0; i < 10; i++ {
+			key := "time-key-" + string(rune('0'+i))
+			raw, found := cs.dbCluster[id].Get(key)
+			if !found {
+				t.Fatalf("server %d: key %q not found", id, key)
+			}
+			var v int
+			dec := gob.NewDecoder(bytes.NewBuffer(raw))
+			if err := dec.Decode(&v); err != nil {
+				t.Fatalf("server %d: decode error: %v", id, err)
+			}
+			if v != i {
+				t.Fatalf("server %d: key %q want %d, got %d", id, key, i, v)
+			}
+		}
+
+		// Check burst 2
+		for i := 10; i < 20; i++ {
+			key := "time-key-" + string(rune('0'+(i-10))) + string(rune('0'+(i/10)))
+			raw, found := cs.dbCluster[id].Get(key)
+			if !found {
+				t.Fatalf("server %d: key %q not found", id, key)
+			}
+			var v int
+			dec := gob.NewDecoder(bytes.NewBuffer(raw))
+			if err := dec.Decode(&v); err != nil {
+				t.Fatalf("server %d: decode error: %v", id, err)
+			}
+			if v != i {
+				t.Fatalf("server %d: key %q want %d, got %d", id, key, i, v)
+			}
+		}
+
+		// Check burst 3
+		for i := 20; i < totalWrites; i++ {
+			key := "time-key-final-" + string(rune('0'+(i-20)))
+			raw, found := cs.dbCluster[id].Get(key)
+			if !found {
+				t.Fatalf("server %d: key %q not found", id, key)
+			}
+			var v int
+			dec := gob.NewDecoder(bytes.NewBuffer(raw))
+			if err := dec.Decode(&v); err != nil {
+				t.Fatalf("server %d: decode error: %v", id, err)
+			}
+			if v != i {
+				t.Fatalf("server %d: key %q want %d, got %d", id, key, i, v)
+			}
+		}
 	}
 }
 

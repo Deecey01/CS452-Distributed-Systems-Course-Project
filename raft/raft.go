@@ -133,7 +133,13 @@ func (rn *RaftNode) debug(format string, args ...interface{}) {
 // notify the caller that the peers have been initialized and the Raft
 // node is ready to be started.
 
+// NewRaftNode creates a new Raft node with default batching configuration (size=10, wait=50ms)
 func NewRaftNode(id uint64, peerList Set, server *Server, db *Database, ready <-chan interface{}, commitChan chan CommitEntry) *RaftNode {
+	return NewRaftNodeWithBatchConfig(id, peerList, server, db, ready, commitChan, 10, 50*time.Millisecond)
+}
+
+// NewRaftNodeWithBatchConfig creates a new Raft node with custom batching configuration
+func NewRaftNodeWithBatchConfig(id uint64, peerList Set, server *Server, db *Database, ready <-chan interface{}, commitChan chan CommitEntry, batchSize int, batchWait time.Duration) *RaftNode {
 	node := &RaftNode{
 		id:                 id,                      // id is the id of the Raft node
 		peerList:           peerList,                // List of peers of this Raft node
@@ -152,8 +158,8 @@ func NewRaftNode(id uint64, peerList Set, server *Server, db *Database, ready <-
 		nextIndex:          make(map[uint64]uint64), // NextIndex is the index of the next log entry to send to each peer
 		matchIndex:         make(map[uint64]uint64), // MatchIndex is the index of the highest log entry known to be replicated on the leader's peers
 		batchBuffer:        make([]interface{}, 0),  // batchBuffer holds commands waiting to be batched
-		maxBatchSize:       10,                      // maxBatchSize default to 10 commands
-		maxBatchWait:       50 * time.Millisecond,   // maxBatchWait default to 50ms
+		maxBatchSize:       batchSize,               // maxBatchSize configured via parameter
+		maxBatchWait:       batchWait,               // maxBatchWait configured via parameter
 		stopBatching:       make(chan struct{}),     // stopBatching channel for cleanup
 	}
 
@@ -504,11 +510,9 @@ func (rn *RaftNode) leaderSendAEs() {
 			}
 			entries := rn.log[int(nextIndex)-1:] //	Get the entries for this peer
 
-			// Debug: Log if we're sending batch entries
-			for _, entry := range entries {
-				if _, isBatch := entry.Command.(Batch); isBatch {
-					rn.debug("Sending BATCH entry at index %d to peer %d", nextIndex, peer)
-				}
+			// Debug: Log batched transmission
+			if len(entries) > 1 {
+				rn.debug("Sending %d log entries (batched transmission) to peer %d", len(entries), peer)
 			}
 
 			args := AppendEntriesArgs{
@@ -702,6 +706,13 @@ func (rn *RaftNode) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesRe
 			if newEntriesIndex <= uint64(len(args.Entries)) {
 				// If the newEntriesIndex is less than the length of the entries, append the entries
 				rn.debug("Inserting entries %v from index %d", args.Entries[newEntriesIndex-1:], logInsertIndex)
+				
+				// Debug: Log batched reception
+				numEntries := len(args.Entries[newEntriesIndex-1:])
+				if numEntries > 1 {
+					rn.debug("Received %d log entries (batched) from leader %d", numEntries, args.LeaderId)
+				}
+				
 				rn.log = append(rn.log[:logInsertIndex-1], args.Entries[newEntriesIndex-1:]...) //	Insert the new entries
 				// Add the code to Update Config
 				// Add code to establish/remove connections
@@ -709,10 +720,6 @@ func (rn *RaftNode) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesRe
 				// loop over the new entries to check if any is for cluster change
 				for _, entry := range args.Entries[newEntriesIndex-1:] {
 					cmd := entry.Command
-					// Debug: Log if we received a Batch
-					if batch, isBatch := cmd.(Batch); isBatch {
-						rn.debug("Received BATCH with %d commands", len(batch.Commands))
-					}
 					switch v := cmd.(type) {
 					case AddServers:
 						for _, peerId := range v.ServerIds {
@@ -900,21 +907,20 @@ func (rn *RaftNode) restoreFromStorage() {
 	}
 }
 
-// flushBatch appends the current batch buffer to the log as a single Batch entry.
+// flushBatch appends each command in the batch buffer as individual log entries.
 // This function must be called with batchMu held and node must be leader with mu held.
 func (rn *RaftNode) flushBatch() {
 	if len(rn.batchBuffer) == 0 {
 		return // Nothing to flush
 	}
 
-	// Create a batch command with all buffered commands
-	batchCmd := Batch{Commands: make([]interface{}, len(rn.batchBuffer))}
-	copy(batchCmd.Commands, rn.batchBuffer)
+	rn.debug("Flushing batch with %d commands as individual log entries", len(rn.batchBuffer))
 
-	rn.debug("Flushing batch with %d commands", len(batchCmd.Commands))
-
-	// Append batch to log (assumes mu is already held by caller)
-	rn.log = append(rn.log, LogEntry{Command: batchCmd, Term: rn.currentTerm})
+	// Append each command as a separate log entry
+	for _, cmd := range rn.batchBuffer {
+		rn.log = append(rn.log, LogEntry{Command: cmd, Term: rn.currentTerm})
+	}
+	
 	rn.persistToStorage()
 	rn.debug("log=%v", rn.log)
 
