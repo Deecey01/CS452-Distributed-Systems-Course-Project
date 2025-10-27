@@ -83,6 +83,9 @@ type RaftNode struct {
 	batchTimer       *time.Timer    // batchTimer triggers batch flush after maxBatchWait
 	batchTimerActive bool           // batchTimerActive indicates if the timer is currently active
 	stopBatching     chan struct{}  // stopBatching signals to stop the batching goroutine
+
+	// Parallel replication optimization (independent of batching)
+	useParallelReplication bool // useParallelReplication enables concurrent AppendEntries to all followers
 }
 
 type RequestVoteArgs struct {
@@ -161,6 +164,7 @@ func NewRaftNodeWithBatchConfig(id uint64, peerList Set, server *Server, db *Dat
 		maxBatchSize:       batchSize,               // maxBatchSize configured via parameter
 		maxBatchWait:       batchWait,               // maxBatchWait configured via parameter
 		stopBatching:       make(chan struct{}),     // stopBatching channel for cleanup
+		useParallelReplication: true,                // Enable parallel replication by default
 	}
 
 	if node.db.HasData() {
@@ -463,6 +467,18 @@ func (rn *RaftNode) becomeLeader() {
 // state  of  the Raft Node accordingly.
 
 func (rn *RaftNode) leaderSendAEs() {
+	// Check if parallel replication is enabled
+	rn.mu.Lock()
+	useParallel := rn.useParallelReplication
+	rn.mu.Unlock()
+
+	if useParallel {
+		// Use parallel replication optimization
+		rn.replicateToFollowersParallel()
+		return
+	}
+
+	// Fall back to sequential replication (original code)
 	rn.mu.Lock()                       // Lock the mutex
 	savedCurrentTerm := rn.currentTerm // Save the current term
 	rn.mu.Unlock()                     // Unlock the mutex
