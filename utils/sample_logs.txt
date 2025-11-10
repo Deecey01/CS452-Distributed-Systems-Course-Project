@@ -1,0 +1,64 @@
+Seed:  1647776199682732205
+=== RUN   TestElectionNormal
+17:06:39.683218 [0] listening at [::]:15867
+17:06:39.683363 [1] listening at [::]:27259
+17:06:39.683470 [2] listening at [::]:9351
+17:06:39.684415 [2] Election Timer started (215ms), term=0
+17:06:39.684454 [1] Election Timer started (290ms), term=0
+17:06:39.684462 [0] Election Timer started (199ms), term=0
+17:06:39.885142 [0] Becomes Candidate (currentTerm=1); log=[]
+17:06:39.885376 [0] Election Timer started (262ms), term=1
+17:06:39.885393 [0] Sending RequestVote to 1: {Term:1 CandidateId:0 LastLogIndex:0 LastLogTerm:0}
+17:06:39.885495 [0] Sending RequestVote to 2: {Term:1 CandidateId:0 LastLogIndex:0 LastLogTerm:0}
+17:06:39.892139 [2] RequestVote: {Term:1 CandidateId:0 LastLogIndex:0 LastLogTerm:0} [currentTerm=0, votedFor=-1, log index/term=(0, 0)]
+17:06:39.892187 [2] Term out of date with term in RequestVote
+17:06:39.892228 [2] Becomes Follower with term=1; log=[]
+17:06:39.892272 [1] RequestVote: {Term:1 CandidateId:0 LastLogIndex:0 LastLogTerm:0} [currentTerm=0, votedFor=-1, log index/term=(0, 0)]
+17:06:39.892331 [1] Term out of date with term in RequestVote
+17:06:39.892356 [1] Becomes Follower with term=1; log=[]
+17:06:39.892536 [2] RequestVote reply: &{Term:1 VoteGranted:true}
+17:06:39.892593 [1] RequestVote reply: &{Term:1 VoteGranted:true}
+17:06:39.892666 [1] Election Timer started (221ms), term=1
+17:06:39.892702 [2] Election Timer started (226ms), term=1
+17:06:39.893176 [0] received RequestVoteReply {Term:1 VoteGranted:true} from 2
+17:06:39.893222 [0] Wins election with 2 votes
+17:06:39.893288 [0] becomes Leader; term=1, nextIndex=map[1:1 2:1], matchIndex=map[1:0 2:0]; log=[]
+17:06:39.893381 [0] sending AppendEntries to 1: ni=1, args={Term:1 LeaderId:0 PrevLogIndex:0 PrevLogTerm:0 Entries:[] LeaderCommit:0}
+17:06:39.893400 [0] sending AppendEntries to 2: ni=1, args={Term:1 LeaderId:0 PrevLogIndex:0 PrevLogTerm:0 Entries:[] LeaderCommit:0}
+17:06:39.893389 [0] received RequestVoteReply {Term:1 VoteGranted:true} from 1
+17:06:39.893562 [0] While waiting for reply, state = Leader
+17:06:39.895158 [2] in election timer term changed from 0 to 1, bailing out
+17:06:39.895265 [1] in election timer term changed from 0 to 1, bailing out
+17:06:39.895270 [2] AppendEntries: {Term:1 LeaderId:0 PrevLogIndex:0 PrevLogTerm:0 Entries:[] LeaderCommit:0}
+17:06:39.895410 [2] AppendEntries reply: {Term:1 Success:true ConflictIndex:0 ConflictTerm:0}
+17:06:39.895663 [0] In election timer state=Leader, bailing out
+17:06:39.895853 [0] AppendEntries reply from 2 success: nextIndex := map[1:1 2:1], matchIndex := map[1:0 2:0]; commitIndex := 0
+17:06:39.898983 [1] AppendEntries: {Term:1 LeaderId:0 PrevLogIndex:0 PrevLogTerm:0 Entries:[] LeaderCommit:0}
+17:06:39.899104 [1] AppendEntries reply: {Term:1 Success:true ConflictIndex:0 ConflictTerm:0}
+17:06:39.899388 [0] AppendEntries reply from 1 success: nextIndex := map[1:1 2:1], matchIndex := map[1:0 2:0]; commitIndex := 0
+17:06:39.943713 [0] sending AppendEntries to 2: ni=1, args={Term:1 LeaderId:0 PrevLogIndex:0 PrevLogTerm:0 Entries:[] LeaderCommit:0}
+17:06:39.943743 [0] sending AppendEntries to 1: ni=1, args={Term:1 LeaderId:0 PrevLogIndex:0 PrevLogTerm:0 Entries:[] LeaderCommit:0}
+17:06:39.945253 [1] AppendEntries: {Term:1 LeaderId:0 PrevLogIndex:0 PrevLogTerm:0 Entries:[] LeaderCommit:0}
+17:06:39.945377 [1] AppendEntries reply: {Term:1 Success:true ConflictIndex:0 ConflictTerm:0}
+17:06:39.945574 [0] AppendEntries reply from 1 success: nextIndex := map[1:1 2:1], matchIndex := map[1:0 2:0]; commitIndex := 0
+17:06:39.946599 [2] AppendEntries: {Term:1 LeaderId:0 PrevLogIndex:0 PrevLogTerm:0 Entries:[] LeaderCommit:0}
+17:06:39.946699 [2] AppendEntries reply: {Term:1 Success:true ConflictIndex:0 ConflictTerm:0}
+17:06:39.946945 [0] AppendEntries reply from 2 success: nextIndex := map[1:1 2:1], matchIndex := map[1:0 2:0]; commitIndex := 0
+17:06:39.985733 [2] Becomes Dead
+17:06:39.985806 [2] Accepting no more connections
+17:06:39.985854 [2] Waiting for existing connections to close
+17:06:39.985884 [2] All connections closed. Stopping server
+17:06:39.985900 [0] Becomes Dead
+17:06:39.986006 [0] sendCommit completed
+17:06:39.986016 [2] sendCommit completed
+17:06:39.986046 [0] Accepting no more connections
+17:06:39.986050 [0] Waiting for existing connections to close
+17:06:39.986123 [0] All connections closed. Stopping server
+17:06:39.986135 [1] Becomes Dead
+17:06:39.986185 [1] Accepting no more connections
+17:06:39.986203 [1] Waiting for existing connections to close
+17:06:39.986214 [1] All connections closed. Stopping server
+17:06:39.986218 [1] sendCommit completed
+--- PASS: TestElectionNormal (0.30s)
+PASS
+ok  	raft-consensus/raft	0.310s
